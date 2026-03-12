@@ -2,6 +2,14 @@
 
 LyricsAtlas is a web-based music discovery platform that lets you search for songs using words or phrases from their lyrics, then filter results by the artist's **country of origin** and **genre**. It bridges the gap between remembering a lyric fragment and finding the exact song — especially for music from specific regions that mainstream search engines tend to bury.
 
+## Screenshots
+
+### Homepage
+![LyricsAtlas Homepage](screenshots/homepage.png)
+
+### Search Results
+![LyricsAtlas Search Results](screenshots/search-results.png)
+
 ## Why LyricsAtlas?
 
 Most music search tools are biased toward Western pop charts. If you're looking for a Nigerian song with a specific lyric, or want to explore Korean hip-hop tracks that mention a certain phrase, generic search engines won't help much. LyricsAtlas solves this by combining full-text lyrics search with geographic and genre filtering — so you can search globally and filter locally.
