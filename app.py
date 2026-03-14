@@ -104,7 +104,7 @@ def genius_search(query, per_page=20, page=1):
             f"{GENIUS_BASE}/search",
             headers=_genius_headers(),
             params={"q": query, "per_page": per_page, "page": page},
-            timeout=12,
+            timeout=8,
         )
         resp.raise_for_status()
         return resp.json().get("response", {}).get("hits", [])
@@ -320,75 +320,61 @@ def search():
     seen_urls = set()
     all_songs = []
 
-    # Step 1: Get known artists from the target country (100 artists, cached)
     country_artist_names = []
     known_country_set = set()
     if country_code:
         country_artist_names = get_artists_from_country(country_code, limit=100)
         known_country_set = {n.lower() for n in country_artist_names}
 
-    # Step 2: Search MusicBrainz for recordings with the keyword in the
-    # title, then cross-reference with known country artists.
-    # This finds exact title matches like "In Your Eyes" by 2Baba.
     recording_genius_queries = []
-    if country_code:
+    if country_code and known_country_set:
         recordings = mb_recording_search(query, limit=100)
         for rec in recordings:
-            credits = rec.get("artist-credit", [])
-            for credit in credits:
-                artist_name = (credit.get("artist") or credit).get("name", "") if isinstance(credit, dict) else ""
-                if not artist_name:
-                    artist_name = credit.get("name", "") if isinstance(credit, dict) else ""
-                if artist_name and artist_name.lower() in known_country_set:
-                    title = rec.get("title", "")
+            for credit in rec.get("artist-credit", []):
+                aname = ""
+                if isinstance(credit, dict):
+                    aname = (credit.get("artist") or credit).get("name", "") or credit.get("name", "")
+                if aname and aname.lower() in known_country_set:
                     recording_genius_queries.append(
-                        (f"{title} {artist_name}", 3, 1)
+                        (f"{rec.get('title', '')} {aname}", 3, 1)
                     )
 
-    # Step 3: Build Genius search queries from all strategies.
     genius_queries = []
 
-    # 3a: Targeted artist + lyrics keyword (all country artists)
     if country_artist_names:
-        for artist_name in country_artist_names:
+        for artist_name in country_artist_names[:25]:
             genius_queries.append((f"{query} {artist_name}", 5, 1))
 
-    # 3b: Recording title matches from MusicBrainz
-    genius_queries.extend(recording_genius_queries)
+    if recording_genius_queries:
+        genius_queries.extend(recording_genius_queries[:10])
 
-    # 3c: Country/genre name as keyword
     if country_name:
         genius_queries.append((f"{query} {country_name}", 20, 1))
     if genre_filter:
         genius_queries.append((f"{query} {genre_filter}", 20, 1))
 
-    # 3d: Genre-only (no country): broad search
     if not country_code:
         for pg in range(1, 4):
             genius_queries.append((query, 25, pg))
 
-    # Run all Genius searches in parallel
     def _do_search(args):
         q, per_page, page = args
         return genius_search(q, per_page=per_page, page=page)
 
-    with ThreadPoolExecutor(max_workers=12) as pool:
+    with ThreadPoolExecutor(max_workers=15) as pool:
         futures = {pool.submit(_do_search, q): q for q in genius_queries}
         for future in as_completed(futures):
             try:
-                hits = future.result()
-                all_songs.extend(_extract_songs(hits, seen_urls))
+                all_songs.extend(_extract_songs(future.result(), seen_urls))
             except Exception:
                 pass
 
     if not all_songs:
         return jsonify({"tracks": [], "total": 0, "filtered": True})
 
-    # Step 4: Verify unknown artists on MusicBrainz (limited lookups)
-    MAX_NEW_LOOKUPS = 10
+    MAX_NEW_LOOKUPS = 5
     new_lookups = 0
-    unique_artists = list(dict.fromkeys(s["artist_name"] for s in all_songs))
-    for name in unique_artists:
+    for name in list(dict.fromkeys(s["artist_name"] for s in all_songs)):
         key = name.strip().lower()
         with _mb_lock:
             already_cached = key in _mb_cache
